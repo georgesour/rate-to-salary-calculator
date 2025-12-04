@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Trash2, Settings, Calculator } from 'lucide-react';
+import { Plus, Trash2, Settings, Calculator, RotateCcw, AlertTriangle } from 'lucide-react';
 
 const Card = ({ children, className = "" }) => (
     <div className={`bg-white rounded-lg shadow-sm border border-gray-200 ${className}`}>
@@ -34,6 +34,7 @@ const SalaryComparator = () => {
     });
 
     const [showSettings, setShowSettings] = useState(false);
+    const [showResetConfirm, setShowResetConfirm] = useState(false);
 
     // --- Data State ---
     // Initialize from LocalStorage or use defaults
@@ -78,6 +79,25 @@ const SalaryComparator = () => {
     }, [config]);
 
     // --- Updates ---
+
+    const handleReset = () => {
+        const defaultRows = [
+            { id: 1, companyName: 'Company A', yearlyPln: 201600 },
+            { id: 2, companyName: 'Company B', yearlyPln: 180000 },
+            { id: 3, companyName: '', yearlyPln: 294000 },
+        ];
+        const defaultConfig = {
+            usdPln: 3.65,
+            eurUsd: 1.16,
+            workingDaysInYear: 251,
+            vacationDays: 27,
+            hoursPerDay: 8,
+        };
+
+        setRows(defaultRows);
+        setConfig(defaultConfig);
+        setShowResetConfirm(false);
+    };
 
     const updateRowField = (id, field, value) => {
         setRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
@@ -212,13 +232,22 @@ const SalaryComparator = () => {
                             Universal Converter: B2B Hourly vs Monthly Employment (adjusted for {config.vacationDays} unpaid days).
                         </p>
                     </div>
-                    <button
-                        onClick={() => setShowSettings(!showSettings)}
-                        className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-md text-sm hover:bg-gray-50 text-gray-700 shadow-sm transition-colors"
-                    >
-                        <Settings className="w-4 h-4" />
-                        {showSettings ? 'Hide Settings' : 'Settings & Rates'}
-                    </button>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => setShowResetConfirm(true)}
+                            className="flex items-center gap-2 px-4 py-2 bg-white border border-red-200 text-red-600 rounded-md text-sm hover:bg-red-50 shadow-sm transition-colors"
+                        >
+                            <RotateCcw className="w-4 h-4" />
+                            Reset
+                        </button>
+                        <button
+                            onClick={() => setShowSettings(!showSettings)}
+                            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-md text-sm hover:bg-gray-50 text-gray-700 shadow-sm transition-colors"
+                        >
+                            <Settings className="w-4 h-4" />
+                            {showSettings ? 'Hide Settings' : 'Settings & Rates'}
+                        </button>
+                    </div>
                 </div>
 
                 {/* Settings Panel */}
@@ -422,6 +451,35 @@ const SalaryComparator = () => {
                 </div>
 
             </div>
+
+            {/* Reset Confirmation Modal */}
+            {showResetConfirm && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200">
+                    <Card className="w-full max-w-md p-6 mx-4">
+                        <div className="flex items-center gap-3 text-red-600 mb-4">
+                            <AlertTriangle className="w-6 h-6" />
+                            <h3 className="text-lg font-bold">Reset Application?</h3>
+                        </div>
+                        <p className="text-gray-600 mb-6">
+                            This will erase all your current data, companies, and custom rates, returning the application to its default state. This action cannot be undone.
+                        </p>
+                        <div className="flex justify-end gap-3">
+                            <button
+                                onClick={() => setShowResetConfirm(false)}
+                                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-md text-sm font-medium transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleReset}
+                                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md text-sm font-medium shadow-sm transition-colors"
+                            >
+                                Yes, Reset Everything
+                            </button>
+                        </div>
+                    </Card>
+                </div>
+            )}
         </div>
     );
 };
