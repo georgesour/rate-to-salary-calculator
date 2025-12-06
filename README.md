@@ -1,16 +1,16 @@
-# Salary Comparator Poland
+# B2B Rates Calculator for Poland
 
-Compare salary rates between B2B hourly contracts and monthly employment in Poland. Convert between PLN, USD, and EUR with customizable exchange rates.
+Compare hourly rates to fixed monthly or yearly pay. Convert between PLN, USD, and EUR with customizable exchange rates.
 
 🌐 **[rate-to-salary-calculator](https://georgesour.github.io/rate-to-salary-calculator)**
 
-## Why 
+## Why
 
-When comparing job offers in Poland, you often need to compare:
-- **B2B hourly rates** (paid only for working days, excluding vacations)
-- **Monthly employment salaries** (fixed monthly pay + paid vacations + sick days)
+When evaluating job offers in Poland, you typically need to compare:
+- **B2B hourly rates** (Paid only for actual working hours/days, excluding holidays and sick/vacation days)
+- **Fixed monthly salary** (Includes paid vacations, sick days, and holidays)
 
-This tool helps you quickly see equivalent rates across different contract types and currencies, making it easy to evaluate job offers or negotiate contracts.
+This tool helps you quickly find the equivalent value across different offers and currencies, simplifying job evaluation and contract negotiation.
 
 ---
 
