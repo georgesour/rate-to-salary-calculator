@@ -32,6 +32,8 @@ const cleanNumericValue = (str) => str.replace(/[^0-9.]/g, '');
 
 const roundToCents = (value) => Math.round(value * 10) / 10;
 
+const roundToThreeDecimals = (value) => Math.round(value * 1000) / 1000;
+
 const formatCurrency = (value, decimals = 0) => {
     if (value === 0) return '';
     return new Intl.NumberFormat('en-US', {
@@ -208,9 +210,9 @@ const SalaryComparator = () => {
             const data = await response.json();
             
             if (data.rates?.PLN && data.rates?.EUR) {
-                const usdPln = data.rates.PLN;
+                const usdPln = roundToThreeDecimals(data.rates.PLN);
                 const usdEur = data.rates.EUR;
-                const eurUsd = roundToCents(1 / usdEur);
+                const eurUsd = roundToThreeDecimals(1 / usdEur);
                 
                 setConfig(prev => ({
                     ...prev,
@@ -347,7 +349,7 @@ const SalaryComparator = () => {
                             </a>
                         </h1>
                         <p className="text-sm text-gray-500 mt-1">
-                            Converts Hourly Rate to Fixed Monthly Pay and other way around. Adjusts for unpaid days ({config.vacationDays}).
+                            Converts Hourly Rate to Fixed Monthly Pay and other way around. Adjusts for unpaid vacation days ({config.vacationDays} per year).
                         </p>
                     </div>
                     <div className="flex gap-2">
@@ -406,12 +408,22 @@ const SalaryComparator = () => {
                                     <span className="text-gray-400 text-sm">$1 =</span>
                                     <input
                                         type="number"
-                                        step="0.01"
-                                        value={config.usdPln}
-                                        onChange={(e) => setConfig(prev => ({
-                                            ...prev,
-                                            usdPln: parseFloat(e.target.value) || 0
-                                        }))}
+                                        step="0.001"
+                                        value={roundToThreeDecimals(config.usdPln)}
+                                        onChange={(e) => {
+                                            const value = parseFloat(e.target.value) || 0;
+                                            setConfig(prev => ({
+                                                ...prev,
+                                                usdPln: roundToThreeDecimals(value)
+                                            }));
+                                        }}
+                                        onBlur={(e) => {
+                                            const value = parseFloat(e.target.value) || 0;
+                                            setConfig(prev => ({
+                                                ...prev,
+                                                usdPln: roundToThreeDecimals(value)
+                                            }));
+                                        }}
                                         className="w-full p-2 outline-none text-sm font-mono"
                                     />
                                     <span className="text-gray-400 text-sm">PLN</span>
@@ -427,20 +439,20 @@ const SalaryComparator = () => {
                                     <span className="text-gray-400 text-sm">€1 =</span>
                                     <input
                                         type="number"
-                                        step="0.01"
-                                        value={roundToCents(config.eurUsd)}
+                                        step="0.001"
+                                        value={roundToThreeDecimals(config.eurUsd)}
                                         onChange={(e) => {
                                             const value = parseFloat(e.target.value) || 0;
                                             setConfig(prev => ({
                                                 ...prev,
-                                                eurUsd: roundToCents(value)
+                                                eurUsd: roundToThreeDecimals(value)
                                             }));
                                         }}
                                         onBlur={(e) => {
                                             const value = parseFloat(e.target.value) || 0;
                                             setConfig(prev => ({
                                                 ...prev,
-                                                eurUsd: roundToCents(value)
+                                                eurUsd: roundToThreeDecimals(value)
                                             }));
                                         }}
                                         className="w-full p-2 outline-none text-sm font-mono"
@@ -450,7 +462,7 @@ const SalaryComparator = () => {
                             </div>
                             
                             <div className="space-y-2">
-                                <label className="text-xs font-medium text-gray-500 block">Unpaid Vacation (B2B)</label>
+                                <label className="text-xs font-medium text-gray-500 block">Vacation Days</label>
                                 <input
                                     type="number"
                                     value={config.vacationDays}
@@ -478,7 +490,7 @@ const SalaryComparator = () => {
                         
                         <div className="mt-4 pt-4 border-t border-blue-100 text-xs text-gray-500 flex gap-4">
                             <span>Implied EUR to PLN: <span className="font-mono font-bold">{(config.eurUsd * config.usdPln).toFixed(2)}</span></span>
-                            <span>Billable Hours (B2B): <span className="font-mono font-bold">{getBillableHoursYearly()}</span> / year</span>
+                            <span>Billable Hours: <span className="font-mono font-bold">{getBillableHoursYearly()}</span> / year</span>
                         </div>
                     </Card>
                 )}
@@ -493,24 +505,24 @@ const SalaryComparator = () => {
                                 
                                 {/* Hourly Columns */}
                                 <th className="px-4 py-3 border-b border-r text-right bg-blue-50/50 w-32">
-                                    Hourly Rate<br/><span className="text-[10px] text-gray-400">PLN (B2B)</span>
+                                    Hourly<br/><span className="text-[10px] text-gray-400">PLN</span>
                                 </th>
                                 <th className="px-4 py-3 border-b border-r text-right bg-blue-50/30 w-32">
-                                    Hourly Rate<br/><span className="text-[10px] text-gray-400">USD</span>
+                                    Hourly<br/><span className="text-[10px] text-gray-400">USD</span>
                                 </th>
                                 <th className="px-4 py-3 border-b border-r text-right bg-blue-50/20 w-32">
-                                    Hourly Rate<br/><span className="text-[10px] text-gray-400">EUR</span>
+                                    Hourly<br/><span className="text-[10px] text-gray-400">EUR</span>
                                 </th>
                                 
                                 {/* Monthly Columns */}
                                 <th className="px-4 py-3 border-b border-r text-right bg-yellow-50/50 w-32">
-                                    Monthly Pay<br/><span className="text-[10px] text-gray-400">PLN (Job)</span>
+                                    Monthly<br/><span className="text-[10px] text-gray-400">PLN</span>
                                 </th>
                                 <th className="px-4 py-3 border-b border-r text-right bg-yellow-50/30 w-32">
-                                    Monthly Pay<br/><span className="text-[10px] text-gray-400">USD</span>
+                                    Monthly<br/><span className="text-[10px] text-gray-400">USD</span>
                                 </th>
                                 <th className="px-4 py-3 border-b border-r text-right bg-yellow-50/20 w-32">
-                                    Monthly Pay<br/><span className="text-[10px] text-gray-400">EUR</span>
+                                    Monthly<br/><span className="text-[10px] text-gray-400">EUR</span>
                                 </th>
                                 
                                 {/* Yearly Columns */}
@@ -588,19 +600,22 @@ const SalaryComparator = () => {
                 {/* Legend / Info */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-500">
                     <Card className="p-4 bg-gray-50">
-                        <h4 className="font-semibold text-gray-700 mb-2">Equivalent Calculator Logic</h4>
+                        <h4 className="font-semibold text-gray-700 mb-2">Calculator Logic</h4>
                         <div className="space-y-2 text-xs">
-                            <p>This table calculates the exact monetary equivalent between an Hourly Rate (with unpaid vacations) and a Fixed Monthly Pay.</p>
+                            <p>The table calculates the monetary equivalent between an Hourly Rate, Fixed Monthly Pay or Yearly Salary.</p>
                             <div className="grid grid-cols-2 gap-4 mt-2">
                                 <div className="bg-blue-50 p-2 rounded">
-                                    <strong>Hourly (B2B)</strong>
-                                    <div className="text-gray-500 mt-1">Paid for working days only.</div>
-                                    <div className="font-mono mt-1">Yearly = Rate × {getBillableHoursYearly()} hrs</div>
+                                    <strong>Hourly</strong>
+                                    <div className="text-gray-500 mt-1">Only working days are paid.</div>
+                                    <div className="font-mono mt-1">Yearly = Hourly Rate × 8 × ({config.workingDaysInYear} - {config.vacationDays})<br/>
+                                        {config.workingDaysInYear} - number of working days in a year<br/>
+                                        {config.vacationDays} - number of expected vacation days
+                                    </div>
                                 </div>
                                 <div className="bg-yellow-50 p-2 rounded">
-                                    <strong>Monthly (Job)</strong>
-                                    <div className="text-gray-500 mt-1">Paid fixed amount × 12 months.</div>
-                                    <div className="font-mono mt-1">Yearly = Pay × 12</div>
+                                    <strong>Monthly</strong>
+                                    <div className="text-gray-500 mt-1">Monthly pay is fixed. Time off is paid too.</div>
+                                    <div className="font-mono mt-1">Yearly = Monthly Pay × 12</div>
                                 </div>
                             </div>
                         </div>
