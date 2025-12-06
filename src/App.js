@@ -1,5 +1,5 @@
 import React, {useState, useEffect, useCallback, useRef} from 'react';
-import {Trash2, Settings, Calculator, RotateCcw, AlertTriangle, Github, RefreshCw} from 'lucide-react';
+import {Plus, Trash2, Settings, Calculator, RotateCcw, AlertTriangle, Github, RefreshCw} from 'lucide-react';
 
 // Constants
 const STORAGE_KEYS = {
@@ -299,6 +299,14 @@ const SalaryComparator = () => {
         updateRowField(id, 'yearlyPln', newYearlyPln);
     }, [getExchangeRate, getBillableHoursYearly, updateRowField]);
     
+    const addNewRow = useCallback(() => {
+        setRows(prev => [...prev, {
+            id: Date.now(),
+            companyName: '',
+            yearlyPln: 0
+        }]);
+    }, []);
+    
     const removeRow = useCallback((id) => {
         setRows(prev => prev.filter(r => r.id !== id));
     }, []);
@@ -565,6 +573,16 @@ const SalaryComparator = () => {
                             ))}
                         </tbody>
                     </table>
+                    <div className="flex justify-end p-2 border-t border-gray-200 bg-gray-50">
+                        <button
+                            onClick={addNewRow}
+                            className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-300 rounded-md text-xs hover:bg-gray-50 text-gray-700 shadow-sm transition-colors"
+                            aria-label="Add new row"
+                        >
+                            <Plus className="w-3 h-3"/>
+                            Add Row
+                        </button>
+                    </div>
                 </div>
                 
                 {/* Legend / Info */}
