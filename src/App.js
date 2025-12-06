@@ -1,13 +1,13 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Trash2, Settings, Calculator, RotateCcw, AlertTriangle } from 'lucide-react';
+import React, {useState, useEffect, useCallback} from 'react';
+import {Plus, Trash2, Settings, Calculator, RotateCcw, AlertTriangle, Github, RefreshCw} from 'lucide-react';
 
-const Card = ({ children, className = "" }) => (
+const Card = ({children, className = ""}) => (
     <div className={`bg-white rounded-lg shadow-sm border border-gray-200 ${className}`}>
         {children}
     </div>
 );
 
-const Input = ({ value, onChange, onBlur, onFocus, className = "", type = "text", ...props }) => (
+const Input = ({value, onChange, onBlur, onFocus, className = "", type = "text", ...props}) => (
     <input
         type={type}
         value={value}
@@ -35,6 +35,9 @@ const SalaryComparator = () => {
 
     const [showSettings, setShowSettings] = useState(false);
     const [showResetConfirm, setShowResetConfirm] = useState(false);
+    const [ratesLoading, setRatesLoading] = useState(false);
+    const [ratesError, setRatesError] = useState(null);
+    const [ratesLastUpdated, setRatesLastUpdated] = useState(null);
 
     // --- Data State ---
     // Initialize from LocalStorage or use defaults
@@ -52,6 +55,59 @@ const SalaryComparator = () => {
         localStorage.setItem('salary_rows', JSON.stringify(rows));
         localStorage.setItem('salary_config', JSON.stringify(config));
     }, [rows, config]);
+
+    // --- Fetch Exchange Rates from API ---
+    const fetchExchangeRates = useCallback(async () => {
+        setRatesLoading(true);
+        setRatesError(null);
+        
+        try {
+            // Try exchangerate-api.com (free, no API key needed)
+            const response = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            if (data.rates && data.rates.PLN && data.rates.EUR) {
+                const usdPln = data.rates.PLN;
+                const usdEur = data.rates.EUR;
+                const eurUsd = Math.round((1 / usdEur) * 100) / 100; // Calculate EUR to USD and round to 2 decimals
+                
+                setConfig(prev => ({
+                    ...prev,
+                    usdPln: usdPln,
+                    eurUsd: eurUsd
+                }));
+                
+                setRatesLastUpdated(new Date().toISOString());
+                localStorage.setItem('rates_last_updated', new Date().toISOString());
+            } else {
+                throw new Error('Invalid response format');
+            }
+        } catch (error) {
+            console.error('Error fetching exchange rates:', error);
+            setRatesError('Failed to load exchange rates. Using cached or default values.');
+        } finally {
+            setRatesLoading(false);
+        }
+    }, []);
+
+    // Load rates on mount (check cache first)
+    useEffect(() => {
+        const cachedUpdateTime = localStorage.getItem('rates_last_updated');
+        const now = new Date();
+        const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        
+        // Only fetch if cache is older than 24 hours or doesn't exist
+        if (!cachedUpdateTime || new Date(cachedUpdateTime) < oneDayAgo) {
+            fetchExchangeRates();
+        } else {
+            setRatesLastUpdated(cachedUpdateTime);
+        }
+    }, [fetchExchangeRates]);
 
     // --- Helpers ---
 
@@ -82,9 +138,9 @@ const SalaryComparator = () => {
 
     const handleReset = () => {
         const defaultRows = [
-            { id: 1, companyName: 'Company A', yearlyPln: 201600 },
-            { id: 2, companyName: 'Company B', yearlyPln: 180000 },
-            { id: 3, companyName: '', yearlyPln: 294000 },
+            {id: 1, companyName: 'Company A', yearlyPln: 201600},
+            {id: 2, companyName: 'Company B', yearlyPln: 180000},
+            {id: 3, companyName: '', yearlyPln: 294000},
         ];
         const defaultConfig = {
             usdPln: 3.65,
@@ -100,7 +156,7 @@ const SalaryComparator = () => {
     };
 
     const updateRowField = (id, field, value) => {
-        setRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
+        setRows(prev => prev.map(r => r.id === id ? {...r, [field]: value} : r));
     };
 
     const updateRowYearlyPLN = (id, newYearlyPLN) => {
@@ -159,7 +215,7 @@ const SalaryComparator = () => {
     };
 
     // Helper to render a cell
-    const Cell = ({ row, type, currency, isBold = false, bgClass = "" }) => {
+    const Cell = ({row, type, currency, isBold = false, bgClass = ""}) => {
 
         let calculatedValue = 0;
         const yearlyPln = row.yearlyPln;
@@ -192,7 +248,26 @@ const SalaryComparator = () => {
 
         const onBlur = () => {
             setIsFocused(false);
-            handleValueChange(row.id, type, currency, localValue);
+            
+            // Only trigger recalculation if the value actually changed
+            const cleanLocalValue = localValue.replace(/[^0-9.]/g, '');
+            const parsedLocalValue = parseFloat(cleanLocalValue);
+            
+            // Remove commas from displayString for comparison
+            const cleanDisplayString = displayString.replace(/,/g, '');
+            const parsedCalculatedValue = parseFloat(cleanDisplayString) || 0;
+            
+            // Compare values (allow small floating point differences)
+            const hasChanged = !isNaN(parsedLocalValue) && 
+                              (isNaN(parsedCalculatedValue) || 
+                               Math.abs(parsedLocalValue - parsedCalculatedValue) > 0.01);
+            
+            if (hasChanged) {
+                handleValueChange(row.id, type, currency, localValue);
+            } else {
+                // Reset to calculated value if no change
+                setLocalValue(displayString);
+            }
         };
 
         return (
@@ -210,7 +285,8 @@ const SalaryComparator = () => {
                     }}
                     className={`text-right w-full h-full ${bgClass} ${isBold ? 'font-bold text-gray-900' : 'text-gray-600'}`}
                 />
-                <span className="absolute left-1 top-1 text-[10px] text-gray-400 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity">
+                <span
+                    className="absolute left-1 top-1 text-[10px] text-gray-400 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity">
           {currency}
         </span>
             </div>
@@ -225,11 +301,21 @@ const SalaryComparator = () => {
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div>
                         <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-                            <Calculator className="w-6 h-6 text-blue-600" />
+                            <Calculator className="w-6 h-6 text-blue-600"/>
                             Salary Comparator Poland
+                            <a
+                                href="https://github.com/georgesour/rate-to-salary-calculator"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="ml-2 text-gray-400 hover:text-gray-600 transition-colors"
+                                aria-label="View on GitHub"
+                            >
+                                <Github className="w-5 h-5"/>
+                            </a>
                         </h1>
                         <p className="text-sm text-gray-500 mt-1">
-                            Universal Converter: B2B Hourly vs Monthly Employment (adjusted for {config.vacationDays} unpaid days).
+                            Universal Converter: B2B Hourly vs Monthly Employment (adjusted
+                            for {config.vacationDays} unpaid days).
                         </p>
                     </div>
                     <div className="flex gap-2">
@@ -237,34 +323,65 @@ const SalaryComparator = () => {
                             onClick={() => setShowResetConfirm(true)}
                             className="flex items-center gap-2 px-4 py-2 bg-white border border-red-200 text-red-600 rounded-md text-sm hover:bg-red-50 shadow-sm transition-colors"
                         >
-                            <RotateCcw className="w-4 h-4" />
+                            <RotateCcw className="w-4 h-4"/>
                             Reset
                         </button>
                         <button
                             onClick={() => setShowSettings(!showSettings)}
                             className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-md text-sm hover:bg-gray-50 text-gray-700 shadow-sm transition-colors"
                         >
-                            <Settings className="w-4 h-4" />
-                            {showSettings ? 'Hide Settings' : 'Settings & Rates'}
+                            <Settings className="w-4 h-4"/>
+                            {showSettings ? 'Hide Settings' : 'Vacations & Currencies'}
                         </button>
                     </div>
                 </div>
 
                 {/* Settings Panel */}
                 {showSettings && (
-                    <Card className="p-6 bg-blue-50/50 border-blue-100 animate-in fade-in slide-in-from-top-4 duration-300">
-                        <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4">Configuration</h3>
+                    <Card
+                        className="p-6 bg-blue-50/50 border-blue-100 animate-in fade-in slide-in-from-top-4 duration-300">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">Configuration</h3>
+                            <button
+                                onClick={fetchExchangeRates}
+                                disabled={ratesLoading}
+                                className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-300 rounded-md text-xs hover:bg-gray-50 text-gray-700 shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Refresh exchange rates from API"
+                            >
+                                <RefreshCw className={`w-3 h-3 ${ratesLoading ? 'animate-spin' : ''}`}/>
+                                {ratesLoading ? 'Loading...' : 'Refresh Rates'}
+                            </button>
+                        </div>
+                        
+                        {ratesError && (
+                            <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md text-xs text-yellow-800">
+                                {ratesError}
+                            </div>
+                        )}
+                        
+                        {ratesLastUpdated && !ratesError && (
+                            <div className="mb-4 text-xs text-gray-500">
+                                Rates last updated: {new Date(ratesLastUpdated).toLocaleString()}
+                            </div>
+                        )}
+                        
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
 
                             <div className="space-y-2">
-                                <label className="text-xs font-medium text-gray-500 block">USD to PLN</label>
+                                <label className="text-xs font-medium text-gray-500 block">
+                                    USD to PLN
+                                    <span className="ml-1 text-gray-400 font-normal">(auto-loaded)</span>
+                                </label>
                                 <div className="flex items-center bg-white border border-gray-200 rounded px-2">
                                     <span className="text-gray-400 text-sm">$1 =</span>
                                     <input
                                         type="number"
                                         step="0.01"
                                         value={config.usdPln}
-                                        onChange={(e) => setConfig({...config, usdPln: parseFloat(e.target.value) || 0})}
+                                        onChange={(e) => setConfig({
+                                            ...config,
+                                            usdPln: parseFloat(e.target.value) || 0
+                                        })}
                                         className="w-full p-2 outline-none text-sm font-mono"
                                     />
                                     <span className="text-gray-400 text-sm">PLN</span>
@@ -272,14 +389,30 @@ const SalaryComparator = () => {
                             </div>
 
                             <div className="space-y-2">
-                                <label className="text-xs font-medium text-gray-500 block">EUR to USD</label>
+                                <label className="text-xs font-medium text-gray-500 block">
+                                    EUR to USD
+                                    <span className="ml-1 text-gray-400 font-normal">(auto-loaded)</span>
+                                </label>
                                 <div className="flex items-center bg-white border border-gray-200 rounded px-2">
                                     <span className="text-gray-400 text-sm">€1 =</span>
                                     <input
                                         type="number"
                                         step="0.01"
-                                        value={config.eurUsd}
-                                        onChange={(e) => setConfig({...config, eurUsd: parseFloat(e.target.value) || 0})}
+                                        value={Math.round(config.eurUsd * 100) / 100}
+                                        onChange={(e) => {
+                                            const value = parseFloat(e.target.value) || 0;
+                                            setConfig({
+                                                ...config,
+                                                eurUsd: Math.round(value * 100) / 100
+                                            });
+                                        }}
+                                        onBlur={(e) => {
+                                            const value = parseFloat(e.target.value) || 0;
+                                            setConfig({
+                                                ...config,
+                                                eurUsd: Math.round(value * 100) / 100
+                                            });
+                                        }}
                                         className="w-full p-2 outline-none text-sm font-mono"
                                     />
                                     <span className="text-gray-400 text-sm">USD</span>
@@ -287,11 +420,15 @@ const SalaryComparator = () => {
                             </div>
 
                             <div className="space-y-2">
-                                <label className="text-xs font-medium text-gray-500 block">Unpaid Vacation Days (B2B)</label>
+                                <label className="text-xs font-medium text-gray-500 block">Unpaid Vacation Days
+                                    (B2B)</label>
                                 <input
                                     type="number"
                                     value={config.vacationDays}
-                                    onChange={(e) => setConfig({...config, vacationDays: parseInt(e.target.value) || 0})}
+                                    onChange={(e) => setConfig({
+                                        ...config,
+                                        vacationDays: parseInt(e.target.value) || 0
+                                    })}
                                     className="w-full p-2 border border-gray-200 rounded bg-white outline-none text-sm focus:border-blue-500"
                                 />
                             </div>
@@ -301,15 +438,20 @@ const SalaryComparator = () => {
                                 <input
                                     type="number"
                                     value={config.workingDaysInYear}
-                                    onChange={(e) => setConfig({...config, workingDaysInYear: parseInt(e.target.value) || 0})}
+                                    onChange={(e) => setConfig({
+                                        ...config,
+                                        workingDaysInYear: parseInt(e.target.value) || 0
+                                    })}
                                     className="w-full p-2 border border-gray-200 rounded bg-white outline-none text-sm focus:border-blue-500"
                                 />
                             </div>
                         </div>
 
                         <div className="mt-4 pt-4 border-t border-blue-100 text-xs text-gray-500 flex gap-4">
-                            <span>Implied EUR to PLN: <span className="font-mono font-bold">{(config.eurUsd * config.usdPln).toFixed(2)}</span></span>
-                            <span>Billable Hours (B2B): <span className="font-mono font-bold">{getBillableHoursYearly()}</span> / year</span>
+                            <span>Implied EUR to PLN: <span
+                                className="font-mono font-bold">{(config.eurUsd * config.usdPln).toFixed(2)}</span></span>
+                            <span>Billable Hours (B2B): <span
+                                className="font-mono font-bold">{getBillableHoursYearly()}</span> / year</span>
                         </div>
                     </Card>
                 )}
@@ -339,9 +481,12 @@ const SalaryComparator = () => {
                             </th>
 
                             {/* Yearly Columns */}
-                            <th className="px-4 py-3 border-b border-r text-right w-32">Yearly<br/><span className="text-[10px] text-gray-400">PLN</span></th>
-                            <th className="px-4 py-3 border-b border-r text-right w-32">Yearly<br/><span className="text-[10px] text-gray-400">USD</span></th>
-                            <th className="px-4 py-3 border-b text-right w-32">Yearly<br/><span className="text-[10px] text-gray-400">EUR</span></th>
+                            <th className="px-4 py-3 border-b border-r text-right w-32">Yearly<br/><span
+                                className="text-[10px] text-gray-400">PLN</span></th>
+                            <th className="px-4 py-3 border-b border-r text-right w-32">Yearly<br/><span
+                                className="text-[10px] text-gray-400">USD</span></th>
+                            <th className="px-4 py-3 border-b text-right w-32">Yearly<br/><span
+                                className="text-[10px] text-gray-400">EUR</span></th>
 
                             <th className="px-4 py-3 border-b w-12"></th>
                         </tr>
@@ -365,31 +510,31 @@ const SalaryComparator = () => {
 
                                 {/* Hourly PLN (Raw Rate) */}
                                 <td className="px-0 py-0 border-r bg-blue-50/20">
-                                    <Cell row={row} type="hourly" currency="PLN" isBold bgClass="px-4 py-2" />
+                                    <Cell row={row} type="hourly" currency="PLN" isBold bgClass="px-4 py-2"/>
                                 </td>
                                 {/* Hourly USD */}
                                 <td className="px-0 py-0 border-r bg-blue-50/10">
-                                    <Cell row={row} type="hourly" currency="USD" bgClass="px-4 py-2" />
+                                    <Cell row={row} type="hourly" currency="USD" bgClass="px-4 py-2"/>
                                 </td>
 
                                 {/* Monthly PLN */}
                                 <td className="px-0 py-0 border-r bg-yellow-50/20">
-                                    <Cell row={row} type="monthly" currency="PLN" isBold bgClass="px-4 py-2" />
+                                    <Cell row={row} type="monthly" currency="PLN" isBold bgClass="px-4 py-2"/>
                                 </td>
                                 {/* Monthly USD */}
                                 <td className="px-0 py-0 border-r bg-yellow-50/10">
-                                    <Cell row={row} type="monthly" currency="USD" bgClass="px-4 py-2" />
+                                    <Cell row={row} type="monthly" currency="USD" bgClass="px-4 py-2"/>
                                 </td>
 
                                 {/* Yearly Totals */}
                                 <td className="px-0 py-0 border-r">
-                                    <Cell row={row} type="yearly" currency="PLN" bgClass="px-4 py-2" />
+                                    <Cell row={row} type="yearly" currency="PLN" bgClass="px-4 py-2"/>
                                 </td>
                                 <td className="px-0 py-0 border-r">
-                                    <Cell row={row} type="yearly" currency="USD" bgClass="px-4 py-2" />
+                                    <Cell row={row} type="yearly" currency="USD" bgClass="px-4 py-2"/>
                                 </td>
                                 <td className="px-0 py-0">
-                                    <Cell row={row} type="yearly" currency="EUR" bgClass="px-4 py-2" />
+                                    <Cell row={row} type="yearly" currency="EUR" bgClass="px-4 py-2"/>
                                 </td>
 
                                 {/* Actions */}
@@ -398,7 +543,7 @@ const SalaryComparator = () => {
                                         onClick={() => removeRow(row.id)}
                                         className="text-gray-300 hover:text-red-500 transition-colors p-1"
                                     >
-                                        <Trash2 className="w-4 h-4" />
+                                        <Trash2 className="w-4 h-4"/>
                                     </button>
                                 </td>
                             </tr>
@@ -411,7 +556,7 @@ const SalaryComparator = () => {
                                     onClick={addNewRow}
                                     className="flex items-center gap-2 text-blue-600 font-medium text-sm px-4 py-2 hover:bg-blue-50 rounded-md transition-colors w-full md:w-auto"
                                 >
-                                    <Plus className="w-4 h-4" />
+                                    <Plus className="w-4 h-4"/>
                                     Add Comparison Row
                                 </button>
                             </td>
@@ -425,7 +570,8 @@ const SalaryComparator = () => {
                     <Card className="p-4 bg-gray-50">
                         <h4 className="font-semibold text-gray-700 mb-2">Equivalent Calculator Logic</h4>
                         <div className="space-y-2 text-xs">
-                            <p>This table calculates the exact monetary equivalent between an Hourly Rate (with unpaid vacations) and a Fixed Monthly Salary.</p>
+                            <p>This table calculates the exact monetary equivalent between an Hourly Rate (with unpaid
+                                vacations) and a Fixed Monthly Salary.</p>
                             <div className="grid grid-cols-2 gap-4 mt-2">
                                 <div className="bg-blue-50 p-2 rounded">
                                     <strong>Hourly (B2B)</strong>
@@ -445,7 +591,7 @@ const SalaryComparator = () => {
                         <ul className="list-disc pl-5 space-y-1">
                             <li><strong>Data is saved automatically</strong> to your browser.</li>
                             <li>Enter your known value in any column to see equivalents.</li>
-                            <li>Change exchange rates in <strong>Settings</strong>.</li>
+                            <li>Change vacations and currency exchange rates in <strong>Settings</strong>.</li>
                         </ul>
                     </Card>
                 </div>
@@ -454,14 +600,16 @@ const SalaryComparator = () => {
 
             {/* Reset Confirmation Modal */}
             {showResetConfirm && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200">
+                <div
+                    className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200">
                     <Card className="w-full max-w-md p-6 mx-4">
                         <div className="flex items-center gap-3 text-red-600 mb-4">
-                            <AlertTriangle className="w-6 h-6" />
+                            <AlertTriangle className="w-6 h-6"/>
                             <h3 className="text-lg font-bold">Reset Application?</h3>
                         </div>
                         <p className="text-gray-600 mb-6">
-                            This will erase all your current data, companies, and custom rates, returning the application to its default state. This action cannot be undone.
+                            This will erase all your current data, companies, and custom rates, returning the
+                            application to its default state. This action cannot be undone.
                         </p>
                         <div className="flex justify-end gap-3">
                             <button

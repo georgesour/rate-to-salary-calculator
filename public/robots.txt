@@ -1,0 +1,8 @@
+# robots.txt for Salary Comparator Poland
+User-agent: *
+Allow: /
+
+Sitemap: https://georgesour.github.io/rate-to-salary-calculator/sitemap.xml
+
+Crawl-delay: 1
+
