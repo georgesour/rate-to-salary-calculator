@@ -1,10 +1,10 @@
 {
   "files": {
-    "main.js": "/rate-to-salary-calculator/static/js/main.bfcf98db.js",
+    "main.js": "/rate-to-salary-calculator/static/js/main.a0111d4e.js",
     "index.html": "/rate-to-salary-calculator/index.html",
-    "main.bfcf98db.js.map": "/rate-to-salary-calculator/static/js/main.bfcf98db.js.map"
+    "main.a0111d4e.js.map": "/rate-to-salary-calculator/static/js/main.a0111d4e.js.map"
   },
   "entrypoints": [
-    "static/js/main.bfcf98db.js"
+    "static/js/main.a0111d4e.js"
   ]
 }
