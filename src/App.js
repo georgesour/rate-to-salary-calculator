@@ -1,6 +1,56 @@
-import React, {useState, useEffect, useLayoutEffect, useCallback, useRef} from 'react';
-import {Plus, Trash2, Settings, Calculator, RotateCcw, AlertTriangle, Github, RefreshCw} from 'lucide-react';
+import React, {useState, useEffect, useCallback, useRef} from 'react';
+import {Trash2, Settings, Calculator, RotateCcw, AlertTriangle, Github, RefreshCw} from 'lucide-react';
 
+// Constants
+const STORAGE_KEYS = {
+    CONFIG: 'salary_config',
+    ROWS: 'salary_rows',
+    RATES_UPDATED: 'rates_last_updated',
+};
+
+const DEFAULT_CONFIG = {
+    usdPln: 3.65,
+    eurUsd: 1.16,
+    workingDaysInYear: 251,
+    vacationDays: 27,
+    hoursPerDay: 8,
+};
+
+const DEFAULT_ROWS = [
+    {id: 1, companyName: 'Company A', yearlyPln: 201600},
+    {id: 2, companyName: 'Company B', yearlyPln: 180000},
+    {id: 3, companyName: '', yearlyPln: 294000},
+];
+
+const EXCHANGE_RATE_API = 'https://api.exchangerate-api.com/v4/latest/USD';
+const CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
+const HOURLY_ROUNDING_STEP = 0.10;
+const MONTHS_PER_YEAR = 12;
+
+// Helper functions
+const cleanNumericValue = (str) => str.replace(/[^0-9.]/g, '');
+
+const roundToCents = (value) => Math.round(value * 10) / 10;
+
+const formatCurrency = (value, decimals = 0) => {
+    if (value === 0) return '';
+    return new Intl.NumberFormat('en-US', {
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals
+    }).format(value);
+};
+
+const loadFromStorage = (key, defaultValue) => {
+    try {
+        const saved = localStorage.getItem(key);
+        return saved ? JSON.parse(saved) : defaultValue;
+    } catch (error) {
+        console.error(`Error loading ${key} from storage:`, error);
+        return defaultValue;
+    }
+};
+
+// Components
 const Card = ({children, className = ""}) => (
     <div className={`bg-white rounded-lg shadow-sm border border-gray-200 ${className}`}>
         {children}
@@ -21,107 +71,91 @@ const Input = React.forwardRef(({value, onChange, onBlur, onFocus, className = "
 ));
 
 const Cell = React.memo(({
-                             row,
-                             type,
-                             currency,
-                             exchangeRate,     // We now pass the specific rate needed
-                             billableHours,    // We pass the calculated billable hours
-                             onUpdate,         // The function to call when value changes
-                             isBold = false,
-                             bgClass = ""
-                         }) => {
-    // 1. Calculate the value to display based on props
+    row,
+    type,
+    currency,
+    exchangeRate,
+    billableHours,
+    onUpdate,
+    isBold = false,
+    bgClass = ""
+}) => {
+    const isUsdOrEurHourly = (currency === 'USD' || currency === 'EUR') && type === 'hourly';
+    
+    // Calculate display value
+    const yearlyInTarget = row.yearlyPln * exchangeRate;
     let calculatedValue = 0;
-    const yearlyPln = row.yearlyPln;
-
-    // Convert Yearly PLN to Target Currency Yearly
-    const yearlyInTarget = yearlyPln * exchangeRate;
-
+    
     if (type === 'hourly') {
         calculatedValue = yearlyInTarget / billableHours;
     } else if (type === 'monthly') {
-        calculatedValue = yearlyInTarget / 12;
+        calculatedValue = yearlyInTarget / MONTHS_PER_YEAR;
     } else if (type === 'yearly') {
         calculatedValue = yearlyInTarget;
     }
-
-    // Round to 10 cents (1 decimal) for USD and EUR hourly rates, otherwise no decimals
-    const isUsdOrEurHourly = (currency === 'USD' || currency === 'EUR') && type === 'hourly';
+    
+    // Round hourly USD/EUR to 10 cents
     if (isUsdOrEurHourly && calculatedValue !== 0) {
-        // Round to nearest 10 cents (0.10)
-        calculatedValue = Math.round(calculatedValue * 10) / 10;
+        calculatedValue = roundToCents(calculatedValue);
     }
     
-    const displayString = calculatedValue === 0 ? '' : new Intl.NumberFormat('en-US', {
-        minimumFractionDigits: isUsdOrEurHourly ? 1 : 0,
-        maximumFractionDigits: isUsdOrEurHourly ? 1 : 0
-    }).format(calculatedValue);
-
-    // 2. Local state for the input
+    const displayString = formatCurrency(calculatedValue, isUsdOrEurHourly ? 1 : 0);
+    
+    // Local state for editing
     const [localValue, setLocalValue] = useState(displayString);
     const [isFocused, setIsFocused] = useState(false);
     const initialValueRef = useRef(displayString);
-
-    // 3. Sync local value with props ONLY when not editing
-    // This prevents the cursor from jumping or resetting while you type
+    
+    // Sync with props when not editing
     useEffect(() => {
         if (!isFocused) {
             setLocalValue(displayString);
             initialValueRef.current = displayString;
         }
     }, [displayString, isFocused]);
-
+    
     const handleKeyDown = (e) => {
         if (e.key === 'Enter') {
             e.target.blur();
-        } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            return;
+        }
+        
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
             e.preventDefault();
-
-            // Logic to calculate new value
-            const cleanValue = localValue.replace(/[^0-9.]/g, '');
+            
+            const cleanValue = cleanNumericValue(localValue);
             const currentValue = parseFloat(cleanValue) || 0;
-            // Use 0.10 step (10 cents) for USD and EUR hourly, otherwise 1
-            const isUsdOrEurHourly = (currency === 'USD' || currency === 'EUR') && type === 'hourly';
-            const step = isUsdOrEurHourly ? 0.10 : 1;
+            const step = isUsdOrEurHourly ? HOURLY_ROUNDING_STEP : 1;
+            
             let newValue = e.key === 'ArrowUp'
                 ? currentValue + step
                 : Math.max(0, currentValue - step);
             
-            // Round to nearest 10 cents for USD and EUR hourly
             if (isUsdOrEurHourly) {
-                newValue = Math.round(newValue * 10) / 10;
+                newValue = roundToCents(newValue);
             }
-
-            const newValueStr = new Intl.NumberFormat('en-US', {
-                minimumFractionDigits: isUsdOrEurHourly ? 1 : 0,
-                maximumFractionDigits: isUsdOrEurHourly ? 1 : 0
-            }).format(newValue);
-
-            // Update UI immediately
+            
+            const newValueStr = formatCurrency(newValue, isUsdOrEurHourly ? 1 : 0);
             setLocalValue(newValueStr);
-
-            // Update Parent
             onUpdate(row.id, type, currency, newValueStr);
         }
     };
-
+    
     const handleFocus = () => {
         setIsFocused(true);
-        // Store the initial value when focusing
         initialValueRef.current = localValue;
     };
-
+    
     const handleBlur = () => {
         setIsFocused(false);
-        // Only trigger recalculation if the value actually changed
-        const cleanLocalValue = localValue.replace(/[^0-9.]/g, '');
-        const cleanInitialValue = initialValueRef.current.replace(/[^0-9.]/g, '');
+        const cleanLocalValue = cleanNumericValue(localValue);
+        const cleanInitialValue = cleanNumericValue(initialValueRef.current);
         
         if (cleanLocalValue !== cleanInitialValue) {
             onUpdate(row.id, type, currency, localValue);
         }
     };
-
+    
     return (
         <div className="relative group h-full">
             <Input
@@ -140,50 +174,32 @@ const Cell = React.memo(({
 });
 
 const SalaryComparator = () => {
-    // --- Configuration State ---
-    // Initialize from LocalStorage or use defaults
-    const [config, setConfig] = useState(() => {
-        const saved = localStorage.getItem('salary_config');
-        return saved ? JSON.parse(saved) : {
-            usdPln: 3.65,
-            eurUsd: 1.16,
-            workingDaysInYear: 251, // Standard average
-            vacationDays: 27, // User specified
-            hoursPerDay: 8,
-        };
-    });
-
+    // State
+    const [config, setConfig] = useState(() => loadFromStorage(STORAGE_KEYS.CONFIG, DEFAULT_CONFIG));
+    const [rows, setRows] = useState(() => loadFromStorage(STORAGE_KEYS.ROWS, DEFAULT_ROWS));
     const [showSettings, setShowSettings] = useState(false);
     const [showResetConfirm, setShowResetConfirm] = useState(false);
     const [ratesLoading, setRatesLoading] = useState(false);
     const [ratesError, setRatesError] = useState(null);
     const [ratesLastUpdated, setRatesLastUpdated] = useState(null);
-
-    // --- Data State ---
-    // Initialize from LocalStorage or use defaults
-    const [rows, setRows] = useState(() => {
-        const saved = localStorage.getItem('salary_rows');
-        return saved ? JSON.parse(saved) : [
-            { id: 1, companyName: 'Company A', yearlyPln: 201600 },
-            { id: 2, companyName: 'Company B', yearlyPln: 180000 },
-            { id: 3, companyName: '', yearlyPln: 294000 },
-        ];
-    });
-
-    // --- Persistence Effect ---
+    
+    // Persistence
     useEffect(() => {
-        localStorage.setItem('salary_rows', JSON.stringify(rows));
-        localStorage.setItem('salary_config', JSON.stringify(config));
+        try {
+            localStorage.setItem(STORAGE_KEYS.ROWS, JSON.stringify(rows));
+            localStorage.setItem(STORAGE_KEYS.CONFIG, JSON.stringify(config));
+        } catch (error) {
+            console.error('Error saving to storage:', error);
+        }
     }, [rows, config]);
-
-    // --- Fetch Exchange Rates from API ---
+    
+    // Exchange rate fetching
     const fetchExchangeRates = useCallback(async () => {
         setRatesLoading(true);
         setRatesError(null);
         
         try {
-            // Try exchangerate-api.com (free, no API key needed)
-            const response = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
+            const response = await fetch(EXCHANGE_RATE_API);
             
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
@@ -191,19 +207,20 @@ const SalaryComparator = () => {
             
             const data = await response.json();
             
-            if (data.rates && data.rates.PLN && data.rates.EUR) {
+            if (data.rates?.PLN && data.rates?.EUR) {
                 const usdPln = data.rates.PLN;
                 const usdEur = data.rates.EUR;
-                const eurUsd = Math.round((1 / usdEur) * 100) / 100; // Calculate EUR to USD and round to 2 decimals
+                const eurUsd = roundToCents(1 / usdEur);
                 
                 setConfig(prev => ({
                     ...prev,
-                    usdPln: usdPln,
-                    eurUsd: eurUsd
+                    usdPln,
+                    eurUsd
                 }));
                 
-                setRatesLastUpdated(new Date().toISOString());
-                localStorage.setItem('rates_last_updated', new Date().toISOString());
+                const updateTime = new Date().toISOString();
+                setRatesLastUpdated(updateTime);
+                localStorage.setItem(STORAGE_KEYS.RATES_UPDATED, updateTime);
             } else {
                 throw new Error('Invalid response format');
             }
@@ -214,132 +231,97 @@ const SalaryComparator = () => {
             setRatesLoading(false);
         }
     }, []);
-
-    // Load rates on mount (check cache first)
+    
+    // Load rates on mount
     useEffect(() => {
-        const cachedUpdateTime = localStorage.getItem('rates_last_updated');
+        const cachedUpdateTime = localStorage.getItem(STORAGE_KEYS.RATES_UPDATED);
         const now = new Date();
-        const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        const cacheExpiry = new Date(now.getTime() - CACHE_DURATION_MS);
         
-        // Only fetch if cache is older than 24 hours or doesn't exist
-        if (!cachedUpdateTime || new Date(cachedUpdateTime) < oneDayAgo) {
+        if (!cachedUpdateTime || new Date(cachedUpdateTime) < cacheExpiry) {
             fetchExchangeRates();
         } else {
             setRatesLastUpdated(cachedUpdateTime);
         }
     }, [fetchExchangeRates]);
-
-    // --- Helpers ---
-
-    // Calculate billable hours in a year for hourly contractors (B2B)
+    
+    // Helpers
     const getBillableHoursYearly = useCallback(() => {
         const billableDays = config.workingDaysInYear - config.vacationDays;
         return billableDays * config.hoursPerDay;
     }, [config]);
-
-    // Currency Conversion
+    
     const getExchangeRate = useCallback((from, to) => {
         if (from === to) return 1;
-
-        // Convert everything to PLN first (Base)
+        
+        // Convert to PLN first
         let toPln = 1;
         if (from === 'USD') toPln = config.usdPln;
         if (from === 'EUR') toPln = config.eurUsd * config.usdPln;
-
-        // Convert PLN to Target
+        
+        // Convert PLN to target
         if (to === 'PLN') return toPln;
         if (to === 'USD') return toPln / config.usdPln;
         if (to === 'EUR') return toPln / (config.eurUsd * config.usdPln);
-
+        
         return 1;
     }, [config]);
-
-    // --- Updates ---
-
-    const handleReset = () => {
-        const defaultRows = [
-            {id: 1, companyName: 'Company A', yearlyPln: 201600},
-            {id: 2, companyName: 'Company B', yearlyPln: 180000},
-            {id: 3, companyName: '', yearlyPln: 294000},
-        ];
-        const defaultConfig = {
-            usdPln: 3.65,
-            eurUsd: 1.16,
-            workingDaysInYear: 251,
-            vacationDays: 27,
-            hoursPerDay: 8,
-        };
-
-        setRows(defaultRows);
-        setConfig(defaultConfig);
+    
+    // Handlers
+    const handleReset = useCallback(() => {
+        setRows(DEFAULT_ROWS);
+        setConfig(DEFAULT_CONFIG);
         setShowResetConfirm(false);
-    };
-
-    const updateRowField = (id, field, value) => {
+    }, []);
+    
+    const updateRowField = useCallback((id, field, value) => {
         setRows(prev => prev.map(r => r.id === id ? {...r, [field]: value} : r));
-    };
-
-    const updateRowYearlyPLN = (id, newYearlyPLN) => {
-        updateRowField(id, 'yearlyPln', newYearlyPLN);
-    };
-
-    const handleValueChange = (id, columnType, columnCurrency, newValueStr) => {
-        // Remove non-numeric chars except dot
-        const cleanVal = newValueStr.replace(/[^0-9.]/g, '');
+    }, []);
+    
+    const handleValueChange = useCallback((id, columnType, columnCurrency, newValueStr) => {
+        const cleanVal = cleanNumericValue(newValueStr);
         const newValue = parseFloat(cleanVal);
-
+        
         if (isNaN(newValue)) return;
-
-        // Determine the new Yearly PLN based on which column was edited
-        let newYearlyPln = 0;
-
-        // 1. Convert input value to PLN
+        
         const rateToPLN = getExchangeRate(columnCurrency, 'PLN');
         const valInPLN = newValue * rateToPLN;
-
-        // 2. Extrapolate to Year based on column type
+        let newYearlyPln = 0;
+        
         if (columnType === 'hourly') {
-            // User edited Hourly Rate -> Yearly = Rate * Billable Hours
             newYearlyPln = valInPLN * getBillableHoursYearly();
         } else if (columnType === 'monthly') {
-            // User edited Monthly Pay -> Yearly = Pay * 12
-            newYearlyPln = valInPLN * 12;
+            newYearlyPln = valInPLN * MONTHS_PER_YEAR;
         } else if (columnType === 'yearly') {
-            // User edited Yearly Total -> Yearly = Value
             newYearlyPln = valInPLN;
         }
-
-        updateRowYearlyPLN(id, newYearlyPln);
-    };
-
-    const addNewRow = () => {
-        setRows([...rows, {
-            id: Date.now(),
-            companyName: '',
-            yearlyPln: 0
-        }]);
-    };
-
-    const removeRow = (id) => {
-        setRows(rows.filter(r => r.id !== id));
-    };
-
-    // --- Render Helpers ---
-
-    const formatNumber = (num) => {
-        if (!num && num !== 0) return '';
-        return new Intl.NumberFormat('en-US', {
-            minimumFractionDigits: 0,
-            maximumFractionDigits: 0
-        }).format(num);
-    };
-
+        
+        updateRowField(id, 'yearlyPln', newYearlyPln);
+    }, [getExchangeRate, getBillableHoursYearly, updateRowField]);
+    
+    const removeRow = useCallback((id) => {
+        setRows(prev => prev.filter(r => r.id !== id));
+    }, []);
+    
+    // Computed values
     const billableHours = getBillableHoursYearly();
-
+    
+    // Column definitions for rendering
+    const columnDefinitions = [
+        {type: 'hourly', currency: 'PLN', bgClass: 'bg-blue-50/20', isBold: true},
+        {type: 'hourly', currency: 'USD', bgClass: 'bg-blue-50/10'},
+        {type: 'hourly', currency: 'EUR', bgClass: 'bg-blue-50/5'},
+        {type: 'monthly', currency: 'PLN', bgClass: 'bg-yellow-50/20', isBold: true},
+        {type: 'monthly', currency: 'USD', bgClass: 'bg-yellow-50/10'},
+        {type: 'monthly', currency: 'EUR', bgClass: 'bg-yellow-50/5'},
+        {type: 'yearly', currency: 'PLN', bgClass: ''},
+        {type: 'yearly', currency: 'USD', bgClass: ''},
+        {type: 'yearly', currency: 'EUR', bgClass: ''},
+    ];
+    
     return (
         <div className="min-h-screen bg-gray-50 p-4 md:p-8 font-sans">
             <div className="max-w-7xl mx-auto space-y-6">
-
                 {/* Header */}
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div>
@@ -377,11 +359,10 @@ const SalaryComparator = () => {
                         </button>
                     </div>
                 </div>
-
+                
                 {/* Settings Panel */}
                 {showSettings && (
-                    <Card
-                        className="p-6 bg-blue-50/50 border-blue-100 animate-in fade-in slide-in-from-top-4 duration-300">
+                    <Card className="p-6 bg-blue-50/50 border-blue-100 animate-in fade-in slide-in-from-top-4 duration-300">
                         <div className="flex justify-between items-center mb-4">
                             <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider">Configuration</h3>
                             <button
@@ -408,7 +389,6 @@ const SalaryComparator = () => {
                         )}
                         
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-
                             <div className="space-y-2">
                                 <label className="text-xs font-medium text-gray-500 block">
                                     USD to PLN
@@ -420,16 +400,16 @@ const SalaryComparator = () => {
                                         type="number"
                                         step="0.01"
                                         value={config.usdPln}
-                                        onChange={(e) => setConfig({
-                                            ...config,
+                                        onChange={(e) => setConfig(prev => ({
+                                            ...prev,
                                             usdPln: parseFloat(e.target.value) || 0
-                                        })}
+                                        }))}
                                         className="w-full p-2 outline-none text-sm font-mono"
                                     />
                                     <span className="text-gray-400 text-sm">PLN</span>
                                 </div>
                             </div>
-
+                            
                             <div className="space-y-2">
                                 <label className="text-xs font-medium text-gray-500 block">
                                     EUR to USD
@@ -440,241 +420,153 @@ const SalaryComparator = () => {
                                     <input
                                         type="number"
                                         step="0.01"
-                                        value={Math.round(config.eurUsd * 100) / 100}
+                                        value={roundToCents(config.eurUsd)}
                                         onChange={(e) => {
                                             const value = parseFloat(e.target.value) || 0;
-                                            setConfig({
-                                                ...config,
-                                                eurUsd: Math.round(value * 100) / 100
-                                            });
+                                            setConfig(prev => ({
+                                                ...prev,
+                                                eurUsd: roundToCents(value)
+                                            }));
                                         }}
                                         onBlur={(e) => {
                                             const value = parseFloat(e.target.value) || 0;
-                                            setConfig({
-                                                ...config,
-                                                eurUsd: Math.round(value * 100) / 100
-                                            });
+                                            setConfig(prev => ({
+                                                ...prev,
+                                                eurUsd: roundToCents(value)
+                                            }));
                                         }}
                                         className="w-full p-2 outline-none text-sm font-mono"
                                     />
                                     <span className="text-gray-400 text-sm">USD</span>
                                 </div>
                             </div>
-
+                            
                             <div className="space-y-2">
                                 <label className="text-xs font-medium text-gray-500 block">Unpaid Vacation (B2B)</label>
                                 <input
                                     type="number"
                                     value={config.vacationDays}
-                                    onChange={(e) => setConfig({
-                                        ...config,
+                                    onChange={(e) => setConfig(prev => ({
+                                        ...prev,
                                         vacationDays: parseInt(e.target.value) || 0
-                                    })}
+                                    }))}
                                     className="w-full p-2 border border-gray-200 rounded bg-white outline-none text-sm focus:border-blue-500"
                                 />
                             </div>
-
+                            
                             <div className="space-y-2">
                                 <label className="text-xs font-medium text-gray-500 block">Working Days / Year</label>
                                 <input
                                     type="number"
                                     value={config.workingDaysInYear}
-                                    onChange={(e) => setConfig({
-                                        ...config,
+                                    onChange={(e) => setConfig(prev => ({
+                                        ...prev,
                                         workingDaysInYear: parseInt(e.target.value) || 0
-                                    })}
+                                    }))}
                                     className="w-full p-2 border border-gray-200 rounded bg-white outline-none text-sm focus:border-blue-500"
                                 />
                             </div>
                         </div>
-
+                        
                         <div className="mt-4 pt-4 border-t border-blue-100 text-xs text-gray-500 flex gap-4">
-                            <span>Implied EUR to PLN: <span
-                                className="font-mono font-bold">{(config.eurUsd * config.usdPln).toFixed(2)}</span></span>
-                            <span>Billable Hours (B2B): <span
-                                className="font-mono font-bold">{getBillableHoursYearly()}</span> / year</span>
+                            <span>Implied EUR to PLN: <span className="font-mono font-bold">{(config.eurUsd * config.usdPln).toFixed(2)}</span></span>
+                            <span>Billable Hours (B2B): <span className="font-mono font-bold">{getBillableHoursYearly()}</span> / year</span>
                         </div>
                     </Card>
                 )}
-
+                
                 {/* Main Spreadsheet */}
                 <div className="overflow-x-auto rounded-lg shadow border border-gray-200 bg-white">
                     <table className="w-full text-sm text-left border-collapse">
                         <thead className="bg-gray-100 text-gray-600 uppercase text-xs font-semibold tracking-wider">
-                        <tr>
-                            <th className="px-2 py-3 border-b border-r w-10 text-center">#</th>
-                            <th className="px-4 py-3 border-b border-r w-48 text-left">Company</th>
-
-                            {/* Hourly Columns */}
-                            <th className="px-4 py-3 border-b border-r text-right bg-blue-50/50 w-32">
-                                Hourly Rate<br/><span className="text-[10px] text-gray-400">PLN (B2B)</span>
-                            </th>
-                            <th className="px-4 py-3 border-b border-r text-right bg-blue-50/30 w-32">
-                                Hourly Rate<br/><span className="text-[10px] text-gray-400">USD</span>
-                            </th>
-                            <th className="px-4 py-3 border-b border-r text-right bg-blue-50/20 w-32">
-                                Hourly Rate<br/><span className="text-[10px] text-gray-400">EUR</span>
-                            </th>
-
-                            {/* Monthly Columns */}
-                            <th className="px-4 py-3 border-b border-r text-right bg-yellow-50/50 w-32">
-                                Monthly Pay<br/><span className="text-[10px] text-gray-400">PLN (Job)</span>
-                            </th>
-                            <th className="px-4 py-3 border-b border-r text-right bg-yellow-50/30 w-32">
-                                Monthly Pay<br/><span className="text-[10px] text-gray-400">USD</span>
-                            </th>
-                            <th className="px-4 py-3 border-b border-r text-right bg-yellow-50/20 w-32">
-                                Monthly Pay<br/><span className="text-[10px] text-gray-400">EUR</span>
-                            </th>
-
-                            {/* Yearly Columns */}
-                            <th className="px-4 py-3 border-b border-r text-right w-32">Yearly<br/><span
-                                className="text-[10px] text-gray-400">PLN</span></th>
-                            <th className="px-4 py-3 border-b border-r text-right w-32">Yearly<br/><span
-                                className="text-[10px] text-gray-400">USD</span></th>
-                            <th className="px-4 py-3 border-b text-right w-32">Yearly<br/><span
-                                className="text-[10px] text-gray-400">EUR</span></th>
-
-                            <th className="px-4 py-3 border-b w-12"></th>
-                        </tr>
+                            <tr>
+                                <th className="px-2 py-3 border-b border-r w-10 text-center">#</th>
+                                <th className="px-4 py-3 border-b border-r w-48 text-left">Company</th>
+                                
+                                {/* Hourly Columns */}
+                                <th className="px-4 py-3 border-b border-r text-right bg-blue-50/50 w-32">
+                                    Hourly Rate<br/><span className="text-[10px] text-gray-400">PLN (B2B)</span>
+                                </th>
+                                <th className="px-4 py-3 border-b border-r text-right bg-blue-50/30 w-32">
+                                    Hourly Rate<br/><span className="text-[10px] text-gray-400">USD</span>
+                                </th>
+                                <th className="px-4 py-3 border-b border-r text-right bg-blue-50/20 w-32">
+                                    Hourly Rate<br/><span className="text-[10px] text-gray-400">EUR</span>
+                                </th>
+                                
+                                {/* Monthly Columns */}
+                                <th className="px-4 py-3 border-b border-r text-right bg-yellow-50/50 w-32">
+                                    Monthly Pay<br/><span className="text-[10px] text-gray-400">PLN (Job)</span>
+                                </th>
+                                <th className="px-4 py-3 border-b border-r text-right bg-yellow-50/30 w-32">
+                                    Monthly Pay<br/><span className="text-[10px] text-gray-400">USD</span>
+                                </th>
+                                <th className="px-4 py-3 border-b border-r text-right bg-yellow-50/20 w-32">
+                                    Monthly Pay<br/><span className="text-[10px] text-gray-400">EUR</span>
+                                </th>
+                                
+                                {/* Yearly Columns */}
+                                <th className="px-4 py-3 border-b border-r text-right w-32">
+                                    Yearly<br/><span className="text-[10px] text-gray-400">PLN</span>
+                                </th>
+                                <th className="px-4 py-3 border-b border-r text-right w-32">
+                                    Yearly<br/><span className="text-[10px] text-gray-400">USD</span>
+                                </th>
+                                <th className="px-4 py-3 border-b text-right w-32">
+                                    Yearly<br/><span className="text-[10px] text-gray-400">EUR</span>
+                                </th>
+                                
+                                <th className="px-4 py-3 border-b w-12"></th>
+                            </tr>
                         </thead>
                         <tbody>
-                        {rows.map((row, index) => (
-                            <tr key={row.id} className="hover:bg-gray-50 group transition-colors">
-                                <td className="px-2 py-3 border-r text-center text-gray-400 text-xs">
-                                    {index + 1}
-                                </td>
-                                <td className="px-0 py-0 border-r">
-                                    <Input
-                                        value={row.companyName}
-                                        onChange={(e) => updateRowField(row.id, 'companyName', e.target.value)}
-                                        placeholder="Enter company..."
-                                        className="px-4 py-2 text-left text-gray-700 placeholder-gray-300"
-                                    />
-                                </td>
-
-                                {/* Example of updated Cell usage */}
-                                <td className="px-0 py-0 border-r bg-blue-50/20">
-                                    <Cell
-                                        row={row}
-                                        type="hourly"
-                                        currency="PLN"
-                                        exchangeRate={getExchangeRate('PLN', 'PLN')}
-                                        billableHours={billableHours}
-                                        onUpdate={handleValueChange}
-                                        isBold
-                                        bgClass="px-4 py-2"
-                                    />
-                                </td>
-                                <td className="px-0 py-0 border-r bg-blue-50/10">
-                                    <Cell
-                                        row={row}
-                                        type="hourly"
-                                        currency="USD"
-                                        exchangeRate={getExchangeRate('PLN', 'USD')}
-                                        billableHours={billableHours}
-                                        onUpdate={handleValueChange}
-                                        bgClass="px-4 py-2"
-                                    />
-                                </td>
-                                <td className="px-0 py-0 border-r bg-blue-50/5">
-                                    <Cell
-                                        row={row}
-                                        type="hourly"
-                                        currency="EUR"
-                                        exchangeRate={getExchangeRate('PLN', 'EUR')}
-                                        billableHours={billableHours}
-                                        onUpdate={handleValueChange}
-                                        bgClass="px-4 py-2"
-                                    />
-                                </td>
-
-                                {/* Monthly PLN */}
-                                <td className="px-0 py-0 border-r bg-yellow-50/20">
-                                    <Cell
-                                        row={row}
-                                        type="monthly"
-                                        currency="PLN"
-                                        exchangeRate={getExchangeRate('PLN', 'PLN')}
-                                        billableHours={billableHours}
-                                        onUpdate={handleValueChange}
-                                        isBold
-                                        bgClass="px-4 py-2"
-                                    />
-                                </td>
-                                {/* Monthly USD */}
-                                <td className="px-0 py-0 border-r bg-yellow-50/10">
-                                    <Cell
-                                        row={row}
-                                        type="monthly"
-                                        currency="USD"
-                                        exchangeRate={getExchangeRate('PLN', 'USD')}
-                                        billableHours={billableHours}
-                                        onUpdate={handleValueChange}
-                                        bgClass="px-4 py-2"
-                                    />
-                                </td>
-                                <td className="px-0 py-0 border-r bg-yellow-50/5">
-                                    <Cell
-                                        row={row}
-                                        type="monthly"
-                                        currency="EUR"
-                                        exchangeRate={getExchangeRate('PLN', 'EUR')}
-                                        billableHours={billableHours}
-                                        onUpdate={handleValueChange}
-                                        bgClass="px-4 py-2"
-                                    />
-                                </td>
-
-                                {/* Yearly Totals */}
-                                <td className="px-0 py-0 border-r">
-                                    <Cell
-                                        row={row}
-                                        type="yearly"
-                                        currency="PLN"
-                                        exchangeRate={getExchangeRate('PLN', 'PLN')}
-                                        billableHours={billableHours}
-                                        onUpdate={handleValueChange}
-                                        bgClass="px-4 py-2"
-                                    />
-                                </td>
-                                <td className="px-0 py-0 border-r">
-                                    <Cell
-                                        row={row}
-                                        type="yearly"
-                                        currency="USD"
-                                        exchangeRate={getExchangeRate('PLN', 'USD')}
-                                        billableHours={billableHours}
-                                        onUpdate={handleValueChange}
-                                        bgClass="px-4 py-2"
-                                    />
-                                </td>
-                                <td className="px-0 py-0">
-                                    <Cell
-                                        row={row}
-                                        type="yearly"
-                                        currency="EUR"
-                                        exchangeRate={getExchangeRate('PLN', 'EUR')}
-                                        billableHours={billableHours}
-                                        onUpdate={handleValueChange}
-                                        bgClass="px-4 py-2"
-                                    />
-                                </td>
-
-                                <td className="px-2 py-2 text-center">
-                                    <button
-                                        onClick={() => removeRow(row.id)}
-                                        className="text-gray-300 hover:text-red-500 transition-colors p-1"
-                                    >
-                                        <Trash2 className="w-4 h-4"/>
-                                    </button>
-                                </td>
-                            </tr>
-                        ))}
+                            {rows.map((row, index) => (
+                                <tr key={row.id} className="hover:bg-gray-50 group transition-colors">
+                                    <td className="px-2 py-3 border-r text-center text-gray-400 text-xs">
+                                        {index + 1}
+                                    </td>
+                                    <td className="px-0 py-0 border-r">
+                                        <Input
+                                            value={row.companyName}
+                                            onChange={(e) => updateRowField(row.id, 'companyName', e.target.value)}
+                                            placeholder="Enter company..."
+                                            className="px-4 py-2 text-left text-gray-700 placeholder-gray-300"
+                                        />
+                                    </td>
+                                    
+                                    {columnDefinitions.map((colDef, colIndex) => {
+                                        const isLast = colIndex === columnDefinitions.length - 1;
+                                        return (
+                                            <td key={`${colDef.type}-${colDef.currency}`} className={`px-0 py-0 ${!isLast ? 'border-r' : ''} ${colDef.bgClass}`}>
+                                                <Cell
+                                                    row={row}
+                                                    type={colDef.type}
+                                                    currency={colDef.currency}
+                                                    exchangeRate={getExchangeRate('PLN', colDef.currency)}
+                                                    billableHours={billableHours}
+                                                    onUpdate={handleValueChange}
+                                                    isBold={colDef.isBold}
+                                                    bgClass="px-4 py-2"
+                                                />
+                                            </td>
+                                        );
+                                    })}
+                                    
+                                    <td className="px-2 py-2 text-center">
+                                        <button
+                                            onClick={() => removeRow(row.id)}
+                                            className="text-gray-300 hover:text-red-500 transition-colors p-1"
+                                            aria-label="Delete row"
+                                        >
+                                            <Trash2 className="w-4 h-4"/>
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
                         </tbody>
                     </table>
                 </div>
-
+                
                 {/* Legend / Info */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-500">
                     <Card className="p-4 bg-gray-50">
@@ -704,13 +596,11 @@ const SalaryComparator = () => {
                         </ul>
                     </Card>
                 </div>
-
             </div>
-
+            
             {/* Reset Confirmation Modal */}
             {showResetConfirm && (
-                <div
-                    className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200">
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200">
                     <Card className="w-full max-w-md p-6 mx-4">
                         <div className="flex items-center gap-3 text-red-600 mb-4">
                             <AlertTriangle className="w-6 h-6"/>
