@@ -614,7 +614,7 @@ const SalaryComparator = () => {
                                 </div>
                                 <div className="bg-yellow-50 p-2 rounded">
                                     <strong>Monthly</strong>
-                                    <div className="text-gray-500 mt-1">Monthly pay is fixed. Time off is paid too.</div>
+                                    <div className="text-gray-500 mt-1">Monthly pay is fixed. Time off is paid.</div>
                                     <div className="font-mono mt-1">Yearly = Monthly Pay × 12</div>
                                 </div>
                             </div>
