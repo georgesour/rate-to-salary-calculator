@@ -1,13 +1,13 @@
 {
   "files": {
     "main.css": "/rate-to-salary-calculator/static/css/main.b80c7d18.css",
-    "main.js": "/rate-to-salary-calculator/static/js/main.46f1ce06.js",
+    "main.js": "/rate-to-salary-calculator/static/js/main.6929d3ba.js",
     "index.html": "/rate-to-salary-calculator/index.html",
     "main.b80c7d18.css.map": "/rate-to-salary-calculator/static/css/main.b80c7d18.css.map",
-    "main.46f1ce06.js.map": "/rate-to-salary-calculator/static/js/main.46f1ce06.js.map"
+    "main.6929d3ba.js.map": "/rate-to-salary-calculator/static/js/main.6929d3ba.js.map"
   },
   "entrypoints": [
     "static/css/main.b80c7d18.css",
-    "static/js/main.46f1ce06.js"
+    "static/js/main.6929d3ba.js"
   ]
 }
